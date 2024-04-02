@@ -165,7 +165,19 @@ class MultipleChoicePipeline(Pipeline):
                 text 5 corresponds to answer choice 1 for question 1,
                 etc.
         """
-        raise NotImplementedError("Problem 2c has not been completed yet!")
+        input_texts = []
+        for question, choices in zip(batch["question"], batch["choices"]):
+            for choice in choices:
+                input_text = ""
+                if self._demos:
+                    input_text += f"{self._demos}"
+                input_text += f"Q: {question}\n"
+                if self._system_prompt:
+                    input_text += f"A:{self._system_prompt} {choice}"
+                else:
+                    input_text += f"A: {choice}"
+                input_texts.append(input_text)
+        return input_texts
 
     def preprocess(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
         """
@@ -183,7 +195,12 @@ class MultipleChoicePipeline(Pipeline):
             These tensors should be stored on the GPU if it is being
             used; otherwise, they should be stored on the CPU
         """
-        raise NotImplementedError("Problem 2d has not been completed yet!")
+        input_texts = self._get_input_texts(batch)
+        tokenized_inputs = self.tokenizer(input_texts, return_tensors="pt", padding=True)
+        input_ids = tokenized_inputs["input_ids"].to(self.device)
+        attention_mask = tokenized_inputs["attention_mask"].to(self.device)
+        return {"input_ids": input_ids, "attention_mask": attention_mask}
+
 
     def _forward(self, input_: Dict[str, torch.Tensor]) -> \
             Dict[str, torch.Tensor]:
@@ -198,7 +215,11 @@ class MultipleChoicePipeline(Pipeline):
         :return: The logit scores assigned to each next-token prediction
             as well as the input_ids tensor from input_
         """
-        raise NotImplementedError("Problem 2d has not been completed yet!")
+        with torch.no_grad():
+            outputs = self.model(**input_)
+            logits = outputs.logits
+            input_ids = input_["input_ids"]
+        return {"input_ids": input_ids, "logits": logits}
 
     def postprocess(self, outputs: Dict[str, torch.Tensor]) -> Output:
         """
@@ -219,7 +240,12 @@ class MultipleChoicePipeline(Pipeline):
             responds to question i and column j corresponds to answer
             choice j
         """
-        raise NotImplementedError("Problem 2d has not been completed yet!")
+        logits = outputs["logits"]
+        input_ids = outputs["input_ids"]
+        losses = self.loss_fn(logits[:, :-1, :].transpose(1, 2), input_ids[:, 1:])
+        losses = losses.sum(dim=1).reshape(-1, self.num_choices)
+        predicted_answers = losses.argmin(dim=1)
+        return Output(loss=losses.cpu().numpy(), prediction=predicted_answers.cpu().numpy())
 
 
 def run_model(pipeline: MultipleChoicePipeline, dataset: Dataset,
